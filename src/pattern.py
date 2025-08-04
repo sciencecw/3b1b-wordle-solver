@@ -75,7 +75,7 @@ def patterns_to_string(patterns):
 
 def get_possible_words(guess, pattern, word_list, game_name):
     all_patterns = get_pattern_matrix([guess], word_list, game_name).flatten()
-    return list(np.array(word_list)[all_patterns == pattern])
+    return [str(w) for w in np.array(word_list)[all_patterns == pattern]]
 
 
 def get_word_buckets(guess, possible_words, game_name):
