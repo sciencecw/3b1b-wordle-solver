@@ -169,6 +169,7 @@ def reconstruct_guesses(
     priors: dict[str, float] | None = None,
     n_top_alternatives: int = 5,
     hard_mode: bool = False,
+    restrict_to_answers: bool = False,
 ) -> list[dict]:
     """Reconstruct the most likely sequence of Wordle guesses from a pattern trace.
 
@@ -187,6 +188,8 @@ def reconstruct_guesses(
         n_top_alternatives: Alternatives to report per step in output.
         hard_mode: If True, candidates at step k must also be in current remaining_words
                    (Wordle hard mode constraint).
+        restrict_to_answers: If True, only consider the 2,315 official answer words as
+                             possible guesses (models players who only try common words).
 
     Returns:
         List of result dicts ranked by probability. Each dict contains:
@@ -204,6 +207,9 @@ def reconstruct_guesses(
     allowed_words = get_word_list(game_name, short=False)
     possible_words = get_word_list(game_name, short=True)
 
+    # Vocabulary from which the human's guesses are drawn
+    guess_vocab = possible_words if restrict_to_answers else allowed_words
+
     allowed_set = set(allowed_words)
     if answer not in allowed_set:
         raise ValueError(f"Answer '{answer}' not in allowed words for game '{game_name}'")
@@ -215,7 +221,7 @@ def reconstruct_guesses(
     step_candidates: list[list[str]] = []
     for k in range(n_guesses - 1):
         candidates = get_candidates_for_pattern(
-            answer, parsed_patterns[k], allowed_words, game_name
+            answer, parsed_patterns[k], guess_vocab, game_name
         )
         if not candidates:
             raise ValueError(
