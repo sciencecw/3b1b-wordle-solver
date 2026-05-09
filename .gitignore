@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 *.pyo
-*.npy
+# Large precomputed matrix (161MB) - too big for git
+data/*/pattern_matrix.npy
+# Allow the small answers-only matrix if precomputed
+!data/*/pattern_matrix_answers.npy
 *.json
 simulation_results/
 .ruff_cache/
