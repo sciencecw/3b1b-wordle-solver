@@ -128,12 +128,6 @@ def main() -> None:
         help="Number of reconstructions to display (default: 5)",
     )
     parser.add_argument(
-        "--first-guess-boost",
-        type=float,
-        default=5.0,
-        help="Probability multiplier for known common openers at step 1 (default: 5.0)",
-    )
-    parser.add_argument(
         "--prior",
         choices=["wordle", "frequency"],
         default="wordle",
@@ -204,7 +198,6 @@ def main() -> None:
             game_name=args.game_name,
             beta=beta,
             beam_width=args.beam_width,
-            first_guess_boost=args.first_guess_boost,
             priors=priors,
             hard_mode=args.hard_mode,
             restrict_to_answers=args.restrict_to_answers,

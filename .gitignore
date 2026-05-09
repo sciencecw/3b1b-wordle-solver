@@ -6,5 +6,6 @@ data/*/pattern_matrix.npy
 # Allow the small answers-only matrix if precomputed
 !data/*/pattern_matrix_answers.npy
 *.json
+!data/wordle/opener_prior.json
 simulation_results/
 .ruff_cache/
