@@ -36,9 +36,7 @@ BETA_PRESETS: dict[str, float] = {
 # Words not in the dict receive OPENER_PRIOR_DEFAULT (~median of excluded set).
 _OPENER_PRIOR_FILE = Path(__file__).parent.parent / "data" / "wordle" / "opener_prior.json"
 OPENER_PRIOR: dict[str, float] = {}
-OPENER_PRIOR_DEFAULT: float = -0.2   # approximate median for excluded words
 OPENER_PRIOR_WEIGHT: float = 3.0
-FAMILIARITY_PENALTY: float = -2.5   # step-0 penalty for words not in the 2315 answer list
 
 try:
     OPENER_PRIOR = json.loads(_OPENER_PRIOR_FILE.read_text())
@@ -159,17 +157,13 @@ def _score_candidates(
 
     scores = beta * entropies
 
-    if step == 0:
-        if OPENER_PRIOR:
-            scores += OPENER_PRIOR_WEIGHT * np.array(
-                [OPENER_PRIOR.get(c, OPENER_PRIOR_DEFAULT) for c in candidates]
-            )
-        # Familiarity: words in the 2315 answer list are far more likely as human openers.
-        # priors[w] > 0 iff w is in the answer list (true_wordle_prior convention).
-        familiarity = np.array(
-            [0.0 if priors.get(c, 0) > 0 else FAMILIARITY_PENALTY for c in candidates]
+    if step == 0 and OPENER_PRIOR:
+        # OPENER_PRIOR covers all 2315 answer words. Default 0 for rare fallback words
+        # (non-answer words only appear as candidates when no answer-list word matches
+        # the observed pattern, in which case no opener prior applies).
+        scores += OPENER_PRIOR_WEIGHT * np.array(
+            [OPENER_PRIOR.get(c, 0.0) for c in candidates]
         )
-        scores += familiarity
 
     return log_softmax(scores)
 
