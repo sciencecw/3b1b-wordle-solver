@@ -241,14 +241,14 @@ function tilesHtml(patInt) {
   ).join('');
 }
 
-function renderGroups(groups, patterns) {
-  // Merged groups carry groupLogProb (sum of constituent probs); unmerged use logProb
-  const logPs  = groups.map(s => s.groupLogProb != null ? s.groupLogProb : s.logProb);
-  const maxLP  = Math.max(...logPs);
-  const exps   = logPs.map(lp=>Math.exp(lp-maxLP));
-  const total  = exps.reduce((a,b)=>a+b,0);
-  const normPs = exps.map(e=>e/total);
-  const maxN   = normPs[0];
+// beamMaxLP and beamTotal are precomputed from the FULL beam so percentages
+// reflect each group's share of all explored paths, not just the top-3.
+function renderGroups(groups, patterns, beamMaxLP, beamTotal) {
+  const normPs = groups.map(s => {
+    const lp = s.groupLogProb != null ? s.groupLogProb : s.logProb;
+    return Math.exp(lp - beamMaxLP) / beamTotal;
+  });
+  const maxN = normPs[0];
   const medals = ["🥇","🥈","🥉"];
   let html = '<div class="results">';
 
@@ -362,7 +362,10 @@ function onMergeChange() {
   if (!_beam) return;
   const doMerge = document.getElementById('mergeCheck').checked;
   const groups  = doMerge ? mergeBeam(_beam) : _beam.slice(0,3);
-  document.getElementById('output').innerHTML = renderGroups(groups, _patterns);
+  // Normalise against the full beam so percentages don't artificially sum to 100%
+  const beamMaxLP = Math.max(..._beam.map(s=>s.logProb));
+  const beamTotal = _beam.reduce((sum,s) => sum + Math.exp(s.logProb - beamMaxLP), 0);
+  document.getElementById('output').innerHTML = renderGroups(groups, _patterns, beamMaxLP, beamTotal);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
