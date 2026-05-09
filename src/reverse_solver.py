@@ -1,0 +1,380 @@
+"""Reverse Wordle solver: reconstruct the most likely guess sequence from a pattern trace.
+
+Given the correct answer and the color pattern for each row, this module finds the
+most probable sequence of guesses a human player made, using a Boltzmann model of
+rationality calibrated against the entropy-based forward solver.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+
+import numpy as np
+from scipy.special import log_softmax
+
+from src.entropy import get_entropies
+from src.pattern import get_pattern_matrix, get_possible_words, pattern_to_string
+from src.prior import get_true_wordle_prior, get_word_list
+from src.solver import get_weights
+
+logger = logging.getLogger(__name__)
+
+# Rationality presets: higher beta = closer to optimal play
+BETA_PRESETS: dict[str, float] = {
+    "random": 0.0,
+    "casual": 2.0,
+    "normal": 5.0,
+    "expert": 10.0,
+}
+
+# Popular human first-word choices; receive a probability boost at step 1
+COMMON_OPENERS: set[str] = {
+    "crane", "salet", "raise", "stare", "adieu",
+    "arose", "slate", "crate", "trace", "roate",
+}
+
+ALL_GREEN_PATTERN: int = 3**5 - 1  # 242
+
+_EMOJI_TO_INT = {"⬛": 0, "🟨": 1, "🟩": 2}
+
+
+# ---------------------------------------------------------------------------
+# Pattern parsing
+# ---------------------------------------------------------------------------
+
+
+def parse_pattern(pattern) -> int:
+    """Convert a pattern to its integer encoding (0–242).
+
+    Accepts:
+    - An int already in range 0–242
+    - A 5-element list/tuple of ints in {0, 1, 2}  (MISS=0, MISPLACED=1, EXACT=2)
+    - A 5-emoji string using ⬛🟨🟩
+    """
+    if isinstance(pattern, int):
+        if not 0 <= pattern <= 242:
+            raise ValueError(f"Pattern int must be 0–242, got {pattern}")
+        return pattern
+    if isinstance(pattern, str):
+        chars = list(pattern)
+        if len(chars) != 5 or not all(c in _EMOJI_TO_INT for c in chars):
+            raise ValueError(
+                f"Pattern string must be 5 emoji from {{⬛,🟨,🟩}}, got '{pattern}'"
+            )
+        return sum(_EMOJI_TO_INT[c] * (3**i) for i, c in enumerate(chars))
+    values = list(pattern)
+    if len(values) != 5:
+        raise ValueError(f"Pattern list must have length 5, got {len(values)}")
+    if not all(v in (0, 1, 2) for v in values):
+        raise ValueError(f"Pattern values must be in {{0,1,2}}, got {values}")
+    return sum(int(v) * (3**i) for i, v in enumerate(values))
+
+
+def parse_pattern_trace(patterns: list) -> list[int]:
+    """Normalize a full trace; validate that the last pattern is all-green (242)."""
+    parsed = [parse_pattern(p) for p in patterns]
+    if not parsed:
+        raise ValueError("Pattern trace must be non-empty")
+    if parsed[-1] != ALL_GREEN_PATTERN:
+        raise ValueError(
+            f"Last pattern must be all-green ({ALL_GREEN_PATTERN}), got {parsed[-1]}. "
+            "The reverse solver assumes the player succeeded on the final guess."
+        )
+    return parsed
+
+
+# ---------------------------------------------------------------------------
+# Candidate lookup
+# ---------------------------------------------------------------------------
+
+
+def get_candidates_for_pattern(
+    answer: str,
+    pattern: int,
+    allowed_words: list[str],
+    game_name: str,
+) -> list[str]:
+    """Return every word in allowed_words that produces `pattern` against `answer`."""
+    col = get_pattern_matrix(allowed_words, [answer], game_name).flatten()
+    return [w for w, p in zip(allowed_words, col) if p == pattern]
+
+
+# ---------------------------------------------------------------------------
+# Beam search state
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BeamState:
+    guesses: list[str] = field(default_factory=list)
+    remaining_words: list[str] = field(default_factory=list)
+    log_prob: float = 0.0
+    step_probs: list[float] = field(default_factory=list)
+    # (n_remaining_before, n_remaining_after) at each step
+    remaining_sizes: list[tuple[int, int]] = field(default_factory=list)
+    # top alternatives (word, prob) at each step
+    top_alternatives_per_step: list[list[tuple[str, float]]] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Scoring
+# ---------------------------------------------------------------------------
+
+
+def _score_candidates(
+    candidates: list[str],
+    remaining_words: list[str],
+    priors: dict[str, float],
+    beta: float,
+    game_name: str,
+    step: int,
+    first_guess_boost: float,
+) -> np.ndarray:
+    """Return log-probabilities for the human choosing each candidate.
+
+    Model: P(G | state) ∝ exp(β · H(G)), where H(G) is the Shannon entropy
+    gained by guessing G given the current remaining word distribution.
+    At step 0, known popular openers receive an additional log(first_guess_boost) bonus.
+    """
+    if not candidates or not remaining_words:
+        return np.full(len(candidates), -np.inf)
+
+    weights = get_weights(remaining_words, priors)
+    entropies = get_entropies(candidates, remaining_words, weights, game_name)
+
+    scores = beta * entropies
+
+    if step == 0 and first_guess_boost > 1.0:
+        boost = np.log(first_guess_boost)
+        for i, c in enumerate(candidates):
+            if c in COMMON_OPENERS:
+                scores[i] += boost
+
+    return log_softmax(scores)
+
+
+# ---------------------------------------------------------------------------
+# Main reconstruction function
+# ---------------------------------------------------------------------------
+
+
+def reconstruct_guesses(
+    patterns: list,
+    answer: str,
+    game_name: str = "wordle",
+    beta: float = 5.0,
+    beam_width: int = 50,
+    first_guess_boost: float = 5.0,
+    priors: dict[str, float] | None = None,
+    n_top_alternatives: int = 5,
+    hard_mode: bool = False,
+) -> list[dict]:
+    """Reconstruct the most likely sequence of Wordle guesses from a pattern trace.
+
+    Args:
+        patterns: List of N patterns. Each can be an int (0–242), a 5-int list, or
+                  a 5-emoji string. The last pattern MUST be all-green (the win).
+        answer:   The correct answer word.
+        game_name: "wordle" or "dungleon".
+        beta:     Rationality parameter. Use BETA_PRESETS or pass a float directly.
+                  0 = random play, 5 = normal human, 10 = near-optimal.
+        beam_width: Number of candidate sequences maintained during search. 50 is fast;
+                    100+ is more thorough.
+        first_guess_boost: Multiplier (in probability space) applied to known common
+                           openers at step 1.
+        priors:   Word probability dict. Defaults to frequency-based priors.
+        n_top_alternatives: Alternatives to report per step in output.
+        hard_mode: If True, candidates at step k must also be in current remaining_words
+                   (Wordle hard mode constraint).
+
+    Returns:
+        List of result dicts ranked by probability. Each dict contains:
+          rank, guesses, log_probability, normalized_probability, step_info.
+        step_info is a list of per-step dicts with guess, pattern, pattern_str,
+        n_candidates, n_remaining_before, n_remaining_after, step_probability,
+        top_alternatives.
+    """
+    parsed_patterns = parse_pattern_trace(patterns)
+    n_guesses = len(parsed_patterns)
+
+    if priors is None:
+        priors = get_true_wordle_prior(game_name)
+
+    allowed_words = get_word_list(game_name, short=False)
+    possible_words = get_word_list(game_name, short=True)
+
+    allowed_set = set(allowed_words)
+    if answer not in allowed_set:
+        raise ValueError(f"Answer '{answer}' not in allowed words for game '{game_name}'")
+
+    # Initial remaining: possible answers with nonzero prior (matches forward solver)
+    initial_remaining = [w for w in possible_words if priors.get(w, 0) > 0]
+
+    # Precompute candidates for steps 0..N-2 (last step is always the answer, pattern 242)
+    step_candidates: list[list[str]] = []
+    for k in range(n_guesses - 1):
+        candidates = get_candidates_for_pattern(
+            answer, parsed_patterns[k], allowed_words, game_name
+        )
+        if not candidates:
+            raise ValueError(
+                f"No allowed word produces pattern {parsed_patterns[k]} "
+                f"({pattern_to_string(parsed_patterns[k])}) against answer '{answer}' "
+                f"at step {k + 1}. The trace may be inconsistent with the answer."
+            )
+        logger.debug(
+            "Step %d: %d candidates for %s",
+            k + 1, len(candidates), pattern_to_string(parsed_patterns[k]),
+        )
+        step_candidates.append(candidates)
+
+    n_candidates_per_step = [len(c) for c in step_candidates] + [1]
+
+    # Initialize beam with a single state covering all possible answers
+    beam: list[BeamState] = [
+        BeamState(
+            guesses=[],
+            remaining_words=initial_remaining,
+            log_prob=0.0,
+            step_probs=[],
+            remaining_sizes=[],
+            top_alternatives_per_step=[],
+        )
+    ]
+
+    # -----------------------------------------------------------------------
+    # Beam search over steps 0..N-2
+    # -----------------------------------------------------------------------
+    for k in range(n_guesses - 1):
+        all_candidates = step_candidates[k]
+        p_k = parsed_patterns[k]
+        new_beam: list[BeamState] = []
+
+        for state in beam:
+            if not state.remaining_words:
+                continue
+
+            # In hard mode, restrict candidates to those still in remaining_words
+            candidates = (
+                [c for c in all_candidates if c in set(state.remaining_words)]
+                if hard_mode
+                else all_candidates
+            )
+            if not candidates:
+                continue
+
+            log_probs = _score_candidates(
+                candidates,
+                state.remaining_words,
+                priors,
+                beta,
+                game_name,
+                step=k,
+                first_guess_boost=first_guess_boost,
+            )
+
+            # Top alternatives for output (before expansion pruning)
+            top_alt_idx = np.argsort(log_probs)[-n_top_alternatives:][::-1]
+            top_alts = [
+                (candidates[i], float(np.exp(log_probs[i]))) for i in top_alt_idx
+            ]
+
+            # Only expand the highest-probability candidates (bounded by beam_width)
+            expansion_limit = min(beam_width, len(candidates))
+            expand_idx = np.argsort(log_probs)[-expansion_limit:]
+
+            n_before = len(state.remaining_words)
+            for i in expand_idx:
+                guess = candidates[i]
+                lp = float(log_probs[i])
+                new_remaining = get_possible_words(
+                    guess, p_k, state.remaining_words, game_name
+                )
+                new_beam.append(BeamState(
+                    guesses=state.guesses + [guess],
+                    remaining_words=new_remaining,
+                    log_prob=state.log_prob + lp,
+                    step_probs=state.step_probs + [float(np.exp(lp))],
+                    remaining_sizes=state.remaining_sizes + [(n_before, len(new_remaining))],
+                    top_alternatives_per_step=state.top_alternatives_per_step + [top_alts],
+                ))
+
+        if not new_beam:
+            raise ValueError(
+                f"Beam collapsed at step {k + 1}: no valid states remain. "
+                "Check that the pattern trace is consistent with the answer."
+            )
+
+        new_beam.sort(key=lambda s: -s.log_prob)
+        beam = new_beam[:beam_width]
+
+    # -----------------------------------------------------------------------
+    # Append the final deterministic guess (the answer itself)
+    # -----------------------------------------------------------------------
+    final_beam: list[BeamState] = []
+    for state in beam:
+        n_before = len(state.remaining_words)
+        final_beam.append(BeamState(
+            guesses=state.guesses + [answer],
+            remaining_words=[answer],
+            log_prob=state.log_prob,
+            step_probs=state.step_probs + [1.0],
+            remaining_sizes=state.remaining_sizes + [(n_before, 1)],
+            top_alternatives_per_step=state.top_alternatives_per_step + [[(answer, 1.0)]],
+        ))
+
+    return _format_results(final_beam, parsed_patterns, n_candidates_per_step, answer)
+
+
+# ---------------------------------------------------------------------------
+# Output formatting
+# ---------------------------------------------------------------------------
+
+
+def _format_results(
+    beam: list[BeamState],
+    patterns: list[int],
+    n_candidates_per_step: list[int],
+    answer: str,
+) -> list[dict]:
+    """Format beam states into ranked reconstruction result dicts."""
+    log_probs = np.array([s.log_prob for s in beam])
+    # Normalize relative probabilities within the returned top-K
+    shifted = log_probs - log_probs.max()
+    exp_shifted = np.exp(shifted)
+    normalized = exp_shifted / exp_shifted.sum()
+
+    results = []
+    for rank, (state, norm_prob) in enumerate(zip(beam, normalized)):
+        step_infos = []
+        for i, (guess, pattern, step_prob, (n_before, n_after), top_alts) in enumerate(
+            zip(
+                state.guesses,
+                patterns,
+                state.step_probs,
+                state.remaining_sizes,
+                state.top_alternatives_per_step,
+            )
+        ):
+            step_infos.append({
+                "step": i + 1,
+                "guess": guess,
+                "pattern": pattern,
+                "pattern_str": pattern_to_string(pattern),
+                "n_candidates": n_candidates_per_step[i],
+                "n_remaining_before": n_before,
+                "n_remaining_after": n_after,
+                "step_probability": step_prob,
+                "top_alternatives": top_alts,
+            })
+
+        results.append({
+            "rank": rank + 1,
+            "guesses": state.guesses,
+            "log_probability": float(state.log_prob),
+            "normalized_probability": float(norm_prob),
+            "step_info": step_infos,
+        })
+
+    return results
