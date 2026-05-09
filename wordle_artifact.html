@@ -11,21 +11,17 @@
   h1{font-size:1.6rem;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px}
   .subtitle{color:#666;font-size:.9rem;margin-bottom:24px;line-height:1.5}
   .card{background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:20px;margin-bottom:16px}
-  label{display:block;font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#555;margin-bottom:8px}
+  label.field-label{display:block;font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#555;margin-bottom:8px}
   textarea{width:100%;border:1.5px solid #ddd;border-radius:8px;padding:10px 12px;font-size:1.05rem;font-family:inherit;outline:none;transition:border-color .15s;resize:vertical;min-height:140px;line-height:1.7}
   textarea:focus{border-color:#6aaa64}
   .field{margin-bottom:18px}
-  /* PIN boxes */
   .pin-row{display:flex;gap:8px;margin-bottom:2px}
-  .pin-box{
-    width:52px;height:52px;border:2px solid #ddd;border-radius:6px;
-    text-align:center;font-size:1.5rem;font-weight:800;font-family:monospace;
-    text-transform:uppercase;outline:none;color:#333;caret-color:transparent;
-    transition:border-color .15s,background .15s;background:#fff;
-  }
+  .pin-box{width:52px;height:52px;border:2px solid #ddd;border-radius:6px;text-align:center;font-size:1.5rem;font-weight:800;font-family:monospace;text-transform:uppercase;outline:none;color:#333;caret-color:transparent;transition:border-color .15s,background .15s;background:#fff}
   .pin-box:focus{border-color:#6aaa64;background:#f8fff8}
   .pin-box.filled{border-color:#aaa}
-  /* Buttons */
+  .merge-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:14px;cursor:pointer}
+  .merge-row input[type=checkbox]{margin-top:2px;flex-shrink:0;accent-color:#6aaa64;width:15px;height:15px;cursor:pointer}
+  .merge-row span{font-size:.83rem;color:#666;line-height:1.4;cursor:pointer}
   .btn-primary{width:100%;padding:13px;background:#6aaa64;color:#fff;border:none;border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;margin-top:4px;transition:background .15s}
   .btn-primary:hover{background:#5a9a54}
   .btn-primary:disabled{background:#aaa;cursor:not-allowed}
@@ -46,9 +42,12 @@
   .tiles{display:flex;gap:2px;flex-shrink:0}
   .tile{width:32px;height:32px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:16px}
   .step-word{font-weight:700;font-family:monospace;font-size:1rem;letter-spacing:1px;min-width:60px}
+  .step-merged{font-family:monospace;font-size:.95rem;letter-spacing:.5px;min-width:60px;line-height:1.5}
+  .step-merged .w0{font-weight:800;color:#333}
+  .step-merged .wN{font-weight:500;color:#888}
   .step-meta{font-size:.75rem;color:#888;line-height:1.5}
   .step-alts{font-size:.72rem;color:#aaa;font-style:italic}
-  @media(max-width:480px){.pin-box{width:46px;height:46px;font-size:1.3rem}.step-word{min-width:48px;font-size:.9rem}.tile{width:28px;height:28px;font-size:14px}}
+  @media(max-width:480px){.pin-box{width:46px;height:46px;font-size:1.3rem}.step-word,.step-merged{min-width:48px;font-size:.9rem}.tile{width:28px;height:28px;font-size:14px}}
 </style>
 </head>
 <body>
@@ -58,23 +57,27 @@
 
   <div class="card">
     <div class="field">
-      <label>Answer word</label>
+      <label class="field-label" for="p0">Answer word</label>
       <div class="pin-row">
-        <input class="pin-box" id="p0" maxlength="1" autocomplete="off" spellcheck="false" inputmode="text">
-        <input class="pin-box" id="p1" maxlength="1" autocomplete="off" spellcheck="false" inputmode="text">
-        <input class="pin-box" id="p2" maxlength="1" autocomplete="off" spellcheck="false" inputmode="text">
-        <input class="pin-box" id="p3" maxlength="1" autocomplete="off" spellcheck="false" inputmode="text">
-        <input class="pin-box" id="p4" maxlength="1" autocomplete="off" spellcheck="false" inputmode="text">
+        <input class="pin-box" id="p0" autocomplete="off" spellcheck="false" inputmode="text">
+        <input class="pin-box" id="p1" autocomplete="off" spellcheck="false" inputmode="text">
+        <input class="pin-box" id="p2" autocomplete="off" spellcheck="false" inputmode="text">
+        <input class="pin-box" id="p3" autocomplete="off" spellcheck="false" inputmode="text">
+        <input class="pin-box" id="p4" autocomplete="off" spellcheck="false" inputmode="text">
       </div>
     </div>
     <div class="field">
-      <label>Paste Wordle share</label>
+      <label class="field-label">Paste Wordle share</label>
       <textarea id="shareIn" placeholder="Wordle 4/6&#10;&#10;⬛🟨🟨⬛⬛&#10;⬛🟨🟨⬛🟨&#10;🟨🟩🟩⬛🟩&#10;🟩🟩🟩🟩🟩" spellcheck="false"></textarea>
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
       <button class="btn-secondary" onclick="loadRandomExample()">🎲 Random example</button>
       <span style="font-size:.78rem;color:#bbb">try a sample game</span>
     </div>
+    <label class="merge-row">
+      <input type="checkbox" id="mergeCheck" onchange="onMergeChange()">
+      <span>Merge reconstructions that differ by only one guess — combines near-identical paths into a single row showing all likely alternatives</span>
+    </label>
     <button id="solveBtn" class="btn-primary" onclick="runSolve()">🔍 Reconstruct guesses</button>
   </div>
 
@@ -169,7 +172,7 @@ function beamSearch(patterns, answer) {
       });
       const lps = logSoftmax(scores);
       const sortedIdx = [...lps.keys()].sort((a,b)=>lps[b]-lps[a]);
-      const stepAlts = sortedIdx.slice(0,4).map(i=>[allCands[i], Math.exp(lps[i])]);
+      const stepAlts = sortedIdx.slice(0,5).map(i=>[allCands[i], Math.exp(lps[i])]);
       const nBefore = state.remaining.length;
       for (const i of sortedIdx.slice(0, BEAM_WIDTH)) {
         const g = allCands[i], lp = lps[i];
@@ -198,6 +201,38 @@ function beamSearch(patterns, answer) {
   }));
 }
 
+// ── Merge ──────────────────────────────────────────────────────────────────
+// Returns groups where each group has `stepWords: string[][]` (per step, list of words)
+function mergeBeam(beam, limit=3) {
+  const absorbed = new Set();
+  const groups   = [];
+
+  for (let i=0; i<beam.length && groups.length<limit; i++) {
+    if (absorbed.has(i)) continue;
+    const base     = beam[i];
+    const altSets  = base.alts.map(stepAlts => new Set(stepAlts.map(([w])=>w)));
+    const stepWords = base.guesses.map(g=>[g]);  // per step: ordered list of words
+
+    for (let j=i+1; j<beam.length; j++) {
+      if (absorbed.has(j)) continue;
+      const cand = beam[j];
+      const diffs = [];
+      for (let k=0; k<base.guesses.length; k++) {
+        if (base.guesses[k] !== cand.guesses[k]) diffs.push(k);
+      }
+      if (diffs.length !== 1) continue;
+      const diffStep = diffs[0];
+      const candWord = cand.guesses[diffStep];
+      if (altSets[diffStep].has(candWord) && !stepWords[diffStep].includes(candWord)) {
+        stepWords[diffStep].push(candWord);
+        absorbed.add(j);
+      }
+    }
+    groups.push({ ...base, stepWords });
+  }
+  return groups;
+}
+
 // ── Rendering ──────────────────────────────────────────────────────────────
 function tilesHtml(patInt) {
   return patToList(patInt).map(v=>
@@ -205,20 +240,22 @@ function tilesHtml(patInt) {
   ).join('');
 }
 
-function renderResults(beam, patterns, answer) {
-  const logPs  = beam.map(s=>s.logProb);
+function renderGroups(groups, patterns) {
+  const logPs  = groups.map(s=>s.logProb);
   const maxLP  = Math.max(...logPs);
   const exps   = logPs.map(lp=>Math.exp(lp-maxLP));
   const total  = exps.reduce((a,b)=>a+b,0);
   const normPs = exps.map(e=>e/total);
   const maxN   = normPs[0];
-
   const medals = ["🥇","🥈","🥉"];
   let html = '<div class="results">';
-  for (let r=0; r<Math.min(3,beam.length); r++) {
-    const s = beam[r];
+
+  for (let r=0; r<groups.length; r++) {
+    const s    = groups[r];
     const pct  = (normPs[r]*100).toFixed(0);
     const barW = (normPs[r]/maxN*100).toFixed(0);
+    // Use stepWords if present (merged mode), else single-word array
+    const stepWords = s.stepWords || s.guesses.map(g=>[g]);
     html += `<div class="result-card">
       <div class="result-header">
         <span class="result-rank">${medals[r]}</span>
@@ -229,21 +266,36 @@ function renderResults(beam, patterns, answer) {
       <div style="margin-top:14px">`;
 
     for (let k=0; k<s.guesses.length; k++) {
-      const g = s.guesses[k];
-      const pat = patterns[k];
-      const [nBefore, nAfter] = s.sizes[k];
-      const prob = s.stepProbs[k];
-      const alts = s.alts[k];
-      const altStr = alts.slice(1,4).map(([w])=>w.toUpperCase()).filter(w=>w!==g.toUpperCase()).join(', ');
-      const isFinal = pat===242;
+      const words    = stepWords[k];
+      const pat      = patterns[k];
+      const [nBefore,nAfter] = s.sizes[k];
+      const prob     = s.stepProbs[k];
+      const alts     = s.alts[k];
+      const isFinal  = pat===242;
+      const merged   = words.length > 1;
+
+      // Word display: merged shows all, normal shows one + alts line
+      let wordHtml;
+      if (merged) {
+        const parts = words.map((w,i)=>
+          `<span class="${i===0?'w0':'wN'}">${w.toUpperCase()}</span>`
+        ).join('<span style="color:#ccc;margin:0 2px">/</span>');
+        wordHtml = `<div class="step-merged">${parts}</div>`;
+      } else {
+        const altStr = alts.slice(1,4).map(([w])=>w.toUpperCase()).filter(w=>w!==words[0].toUpperCase()).join(', ');
+        wordHtml = `<div>
+          <span class="step-word">${words[0].toUpperCase()}</span>
+          ${altStr && !isFinal ? `<div class="step-alts">alt: ${altStr}</div>` : ''}
+        </div>`;
+      }
+
       html += `<div class="step">
         <span class="step-num">${k+1}</span>
         <div class="tiles">${tilesHtml(pat)}</div>
-        <span class="step-word">${g.toUpperCase()}</span>
+        ${wordHtml}
         <div class="step-meta">
           ${isFinal ? '' : `<span style="color:#555">p=${(prob*100).toFixed(0)}%</span> · `}
           <span>${nBefore}→${nAfter} words</span>
-          ${altStr ? `<div class="step-alts">alt: ${altStr}</div>` : ''}
         </div>
       </div>`;
     }
@@ -257,6 +309,8 @@ function renderResults(beam, patterns, answer) {
 const pinBoxes = [...document.querySelectorAll('.pin-box')];
 
 pinBoxes.forEach((box, idx) => {
+  // Select all on focus so typing replaces the existing letter
+  box.addEventListener('focus', () => box.select());
   box.addEventListener('input', () => {
     const val = box.value.replace(/[^a-zA-Z]/g, '');
     box.value = val ? val.slice(-1).toUpperCase() : '';
@@ -265,50 +319,54 @@ pinBoxes.forEach((box, idx) => {
   });
   box.addEventListener('keydown', e => {
     if (e.key === 'Backspace') {
-      if (!box.value && idx > 0) { pinBoxes[idx-1].focus(); pinBoxes[idx-1].value = ''; pinBoxes[idx-1].classList.remove('filled'); }
+      e.preventDefault();
+      if (box.value) {
+        box.value = ''; box.classList.remove('filled');
+      } else if (idx > 0) {
+        pinBoxes[idx-1].value = ''; pinBoxes[idx-1].classList.remove('filled'); pinBoxes[idx-1].focus();
+      }
     }
+    if (e.key === 'ArrowLeft'  && idx>0) { e.preventDefault(); pinBoxes[idx-1].focus(); }
+    if (e.key === 'ArrowRight' && idx<4) { e.preventDefault(); pinBoxes[idx+1].focus(); }
     if (e.key === 'Enter') runSolve();
-    if (e.key === 'ArrowLeft' && idx > 0) pinBoxes[idx-1].focus();
-    if (e.key === 'ArrowRight' && idx < 4) pinBoxes[idx+1].focus();
   });
   box.addEventListener('paste', e => {
     e.preventDefault();
-    const paste = (e.clipboardData || window.clipboardData).getData('text').replace(/[^a-zA-Z]/g, '');
-    pinBoxes.forEach((b, i) => {
-      b.value = i < paste.length ? paste[i].toUpperCase() : '';
-      b.classList.toggle('filled', !!b.value);
-    });
-    pinBoxes[Math.min(paste.length, 4)].focus();
+    const paste = (e.clipboardData||window.clipboardData).getData('text').replace(/[^a-zA-Z]/g,'');
+    pinBoxes.forEach((b,i) => { b.value=i<paste.length?paste[i].toUpperCase():''; b.classList.toggle('filled',!!b.value); });
+    pinBoxes[Math.min(paste.length,4)].focus();
   });
 });
 
-function getAnswer() {
-  return pinBoxes.map(b => b.value.toLowerCase()).join('');
-}
+function getAnswer() { return pinBoxes.map(b=>b.value.toLowerCase()).join(''); }
 
 function setAnswer(word) {
-  pinBoxes.forEach((b, i) => {
-    b.value = i < word.length ? word[i].toUpperCase() : '';
-    b.classList.toggle('filled', !!b.value);
-  });
+  pinBoxes.forEach((b,i) => { b.value=i<word.length?word[i].toUpperCase():''; b.classList.toggle('filled',!!b.value); });
 }
 
 // ── Examples ──────────────────────────────────────────────────────────────
 const EXAMPLES = [
-  {
-    answer: "party",
-    share: "Wordle 4/6\n\n⬛🟨🟨⬛⬛\n⬛🟨🟨⬛🟨\n🟨🟩🟩⬛🟩\n🟩🟩🟩🟩🟩"
-  },
-  {
-    answer: "shore",
-    share: "Wordle 3/6\n\n⬛🟨⬛⬛🟩\n🟩⬛🟩🟩🟩\n🟩🟩🟩🟩🟩"
-  },
+  { answer:"party", share:"Wordle 4/6\n\n⬛🟨🟨⬛⬛\n⬛🟨🟨⬛🟨\n🟨🟩🟩⬛🟩\n🟩🟩🟩🟩🟩" },
+  { answer:"shore", share:"Wordle 3/6\n\n⬛🟨⬛⬛🟩\n🟩⬛🟩🟩🟩\n🟩🟩🟩🟩🟩" },
+  { answer:"crane", share:"Wordle 2/6\n\n⬛⬛🟩🟨🟩\n🟩🟩🟩🟩🟩",   note:"lucky 2/6!" },
+  { answer:"knack", share:"Wordle 4/6\n\n⬛⬛🟩⬛⬛\n⬛⬛🟩🟨⬛\n⬛🟨🟨🟩⬛\n🟩🟩🟩🟩🟩", note:"double-K trap" },
+  { answer:"slump", share:"Wordle 5/6\n\n⬛⬛⬛⬛⬛\n🟩⬛⬛🟨⬛\n🟩🟨🟨⬛⬛\n🟩🟨⬛🟨⬛\n🟩🟩🟩🟩🟩", note:"all-gray opener" },
 ];
 
 function loadRandomExample() {
-  const ex = EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
+  const ex = EXAMPLES[Math.floor(Math.random()*EXAMPLES.length)];
   setAnswer(ex.answer);
   document.getElementById('shareIn').value = ex.share;
+}
+
+// ── State ──────────────────────────────────────────────────────────────────
+let _beam=null, _patterns=null;
+
+function onMergeChange() {
+  if (!_beam) return;
+  const doMerge = document.getElementById('mergeCheck').checked;
+  const groups  = doMerge ? mergeBeam(_beam) : _beam.slice(0,3).map(s=>({...s,stepWords:null}));
+  document.getElementById('output').innerHTML = renderGroups(groups, _patterns);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -320,22 +378,20 @@ function runSolve() {
   const spin   = document.getElementById('spinner');
 
   out.innerHTML = '';
-  if (answer.length !== 5) { out.innerHTML='<div class="error">Please enter all 5 letters of the answer.</div>'; return; }
+  if (answer.length!==5) { out.innerHTML='<div class="error">Please enter all 5 letters of the answer.</div>'; return; }
   if (!WORDS.includes(answer)) { out.innerHTML=`<div class="error">"${answer.toUpperCase()}" is not in the Wordle answer list. Check spelling.</div>`; return; }
 
-  btn.disabled = true;
-  spin.style.display = 'block';
+  btn.disabled=true; spin.style.display='block';
 
-  setTimeout(() => {
+  setTimeout(()=>{
     try {
-      const patterns = parseShare(share);
-      const beam = beamSearch(patterns, answer);
-      out.innerHTML = renderResults(beam, patterns, answer);
+      _patterns = parseShare(share);
+      _beam     = beamSearch(_patterns, answer);
+      onMergeChange();
     } catch(e) {
-      out.innerHTML = `<div class="error">${e}</div>`;
+      out.innerHTML=`<div class="error">${e}</div>`;
     } finally {
-      btn.disabled = false;
-      spin.style.display = 'none';
+      btn.disabled=false; spin.style.display='none';
     }
   }, 30);
 }
