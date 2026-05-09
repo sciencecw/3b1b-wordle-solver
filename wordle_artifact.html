@@ -42,12 +42,9 @@
   .tiles{display:flex;gap:2px;flex-shrink:0}
   .tile{width:32px;height:32px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:16px}
   .step-word{font-weight:700;font-family:monospace;font-size:1rem;letter-spacing:1px;min-width:60px}
-  .step-merged{font-family:monospace;font-size:.95rem;letter-spacing:.5px;min-width:60px;line-height:1.5}
-  .step-merged .w0{font-weight:800;color:#333}
-  .step-merged .wN{font-weight:500;color:#888}
   .step-meta{font-size:.75rem;color:#888;line-height:1.5}
   .step-alts{font-size:.72rem;color:#aaa;font-style:italic}
-  @media(max-width:480px){.pin-box{width:46px;height:46px;font-size:1.3rem}.step-word,.step-merged{min-width:48px;font-size:.9rem}.tile{width:28px;height:28px;font-size:14px}}
+  @media(max-width:480px){.pin-box{width:46px;height:46px;font-size:1.3rem}.step-word{min-width:48px;font-size:.9rem}.tile{width:28px;height:28px;font-size:14px}}
 </style>
 </head>
 <body>
@@ -172,7 +169,7 @@ function beamSearch(patterns, answer) {
       });
       const lps = logSoftmax(scores);
       const sortedIdx = [...lps.keys()].sort((a,b)=>lps[b]-lps[a]);
-      const stepAlts = sortedIdx.slice(0,5).map(i=>[allCands[i], Math.exp(lps[i])]);
+      const stepAlts = sortedIdx.slice(0,8).map(i=>[allCands[i], Math.exp(lps[i])]);
       const nBefore = state.remaining.length;
       for (const i of sortedIdx.slice(0, BEAM_WIDTH)) {
         const g = allCands[i], lp = lps[i];
@@ -202,20 +199,23 @@ function beamSearch(patterns, answer) {
 }
 
 // ── Merge ──────────────────────────────────────────────────────────────────
-// Returns groups where each group has `stepWords: string[][]` (per step, list of words)
+// Each merged group has:
+//   mergedAlts: string[][]  — per step, absorbed alternative words (NOT the base word)
+//   groupLogProb: number    — log of summed probability of all constituent beam states
 function mergeBeam(beam, limit=3) {
   const absorbed = new Set();
   const groups   = [];
 
   for (let i=0; i<beam.length && groups.length<limit; i++) {
     if (absorbed.has(i)) continue;
-    const base     = beam[i];
-    const altSets  = base.alts.map(stepAlts => new Set(stepAlts.map(([w])=>w)));
-    const stepWords = base.guesses.map(g=>[g]);  // per step: ordered list of words
+    const base      = beam[i];
+    const altSets   = base.alts.map(stepAlts => new Set(stepAlts.map(([w])=>w)));
+    const mergedAlts = base.guesses.map(()=>[]);  // per step: absorbed alts (excl. base)
+    let probSum     = Math.exp(base.logProb);
 
     for (let j=i+1; j<beam.length; j++) {
       if (absorbed.has(j)) continue;
-      const cand = beam[j];
+      const cand  = beam[j];
       const diffs = [];
       for (let k=0; k<base.guesses.length; k++) {
         if (base.guesses[k] !== cand.guesses[k]) diffs.push(k);
@@ -223,12 +223,13 @@ function mergeBeam(beam, limit=3) {
       if (diffs.length !== 1) continue;
       const diffStep = diffs[0];
       const candWord = cand.guesses[diffStep];
-      if (altSets[diffStep].has(candWord) && !stepWords[diffStep].includes(candWord)) {
-        stepWords[diffStep].push(candWord);
+      if (altSets[diffStep].has(candWord) && !mergedAlts[diffStep].includes(candWord)) {
+        mergedAlts[diffStep].push(candWord);
+        probSum += Math.exp(cand.logProb);
         absorbed.add(j);
       }
     }
-    groups.push({ ...base, stepWords });
+    groups.push({ ...base, mergedAlts, groupLogProb: Math.log(probSum) });
   }
   return groups;
 }
@@ -241,7 +242,8 @@ function tilesHtml(patInt) {
 }
 
 function renderGroups(groups, patterns) {
-  const logPs  = groups.map(s=>s.logProb);
+  // Merged groups carry groupLogProb (sum of constituent probs); unmerged use logProb
+  const logPs  = groups.map(s => s.groupLogProb != null ? s.groupLogProb : s.logProb);
   const maxLP  = Math.max(...logPs);
   const exps   = logPs.map(lp=>Math.exp(lp-maxLP));
   const total  = exps.reduce((a,b)=>a+b,0);
@@ -251,48 +253,42 @@ function renderGroups(groups, patterns) {
   let html = '<div class="results">';
 
   for (let r=0; r<groups.length; r++) {
-    const s    = groups[r];
-    const pct  = (normPs[r]*100).toFixed(0);
-    const barW = (normPs[r]/maxN*100).toFixed(0);
-    // Use stepWords if present (merged mode), else single-word array
-    const stepWords = s.stepWords || s.guesses.map(g=>[g]);
+    const s      = groups[r];
+    const pct    = (normPs[r]*100).toFixed(0);
+    const barW   = (normPs[r]/maxN*100).toFixed(0);
+    const nMerged = s.mergedAlts ? s.mergedAlts.reduce((n,a)=>n+a.length, 0) : 0;
+    const mergeLabel = nMerged > 0
+      ? ` <span style="font-size:.72rem;color:#999;font-weight:400">(+${nMerged} merged)</span>` : '';
+
     html += `<div class="result-card">
       <div class="result-header">
         <span class="result-rank">${medals[r]}</span>
-        <span class="result-title">Reconstruction #${r+1}</span>
+        <span class="result-title">Reconstruction #${r+1}${mergeLabel}</span>
         <span class="result-conf">${pct}% relative confidence</span>
       </div>
       <div class="conf-bar" style="width:${barW}%"></div>
       <div style="margin-top:14px">`;
 
     for (let k=0; k<s.guesses.length; k++) {
-      const words    = stepWords[k];
-      const pat      = patterns[k];
+      const g      = s.guesses[k];
+      const pat    = patterns[k];
       const [nBefore,nAfter] = s.sizes[k];
-      const prob     = s.stepProbs[k];
-      const alts     = s.alts[k];
-      const isFinal  = pat===242;
-      const merged   = words.length > 1;
+      const prob   = s.stepProbs[k];
+      const isFinal = pat===242;
 
-      // Word display: merged shows all, normal shows one + alts line
-      let wordHtml;
-      if (merged) {
-        const parts = words.map((w,i)=>
-          `<span class="${i===0?'w0':'wN'}">${w.toUpperCase()}</span>`
-        ).join('<span style="color:#ccc;margin:0 2px">/</span>');
-        wordHtml = `<div class="step-merged">${parts}</div>`;
-      } else {
-        const altStr = alts.slice(1,4).map(([w])=>w.toUpperCase()).filter(w=>w!==words[0].toUpperCase()).join(', ');
-        wordHtml = `<div>
-          <span class="step-word">${words[0].toUpperCase()}</span>
-          ${altStr && !isFinal ? `<div class="step-alts">alt: ${altStr}</div>` : ''}
-        </div>`;
-      }
+      // Alt line: in merge mode show absorbed alts; in normal mode show scored alts
+      const absorbed = s.mergedAlts ? s.mergedAlts[k] : [];
+      const altStr = absorbed.length > 0
+        ? absorbed.map(w=>w.toUpperCase()).join(', ')
+        : s.alts[k].slice(1,4).map(([w])=>w.toUpperCase()).filter(w=>w!==g.toUpperCase()).join(', ');
 
       html += `<div class="step">
         <span class="step-num">${k+1}</span>
         <div class="tiles">${tilesHtml(pat)}</div>
-        ${wordHtml}
+        <div>
+          <span class="step-word">${g.toUpperCase()}</span>
+          ${altStr && !isFinal ? `<div class="step-alts">alt: ${altStr}</div>` : ''}
+        </div>
         <div class="step-meta">
           ${isFinal ? '' : `<span style="color:#555">p=${(prob*100).toFixed(0)}%</span> · `}
           <span>${nBefore}→${nAfter} words</span>
@@ -365,7 +361,7 @@ let _beam=null, _patterns=null;
 function onMergeChange() {
   if (!_beam) return;
   const doMerge = document.getElementById('mergeCheck').checked;
-  const groups  = doMerge ? mergeBeam(_beam) : _beam.slice(0,3).map(s=>({...s,stepWords:null}));
+  const groups  = doMerge ? mergeBeam(_beam) : _beam.slice(0,3);
   document.getElementById('output').innerHTML = renderGroups(groups, _patterns);
 }
 
