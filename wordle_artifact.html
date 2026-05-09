@@ -73,7 +73,7 @@
     </div>
     <label class="merge-row">
       <input type="checkbox" id="mergeCheck" onchange="onMergeChange()">
-      <span>Merge reconstructions that differ by only one guess — combines near-identical paths into a single row showing all likely alternatives</span>
+      <span>Merge paths that differ by one guess</span>
     </label>
     <button id="solveBtn" class="btn-primary" onclick="runSolve()">🔍 Reconstruct guesses</button>
   </div>
@@ -231,6 +231,8 @@ function mergeBeam(beam, limit=3) {
     }
     groups.push({ ...base, mergedAlts, groupLogProb: Math.log(probSum) });
   }
+  // Re-sort so highest combined-probability group is always first
+  groups.sort((a,b) => b.groupLogProb - a.groupLogProb);
   return groups;
 }
 
@@ -284,11 +286,11 @@ function renderGroups(groups, patterns, beamMaxLP, beamTotal) {
 
       html += `<div class="step">
         <span class="step-num">${k+1}</span>
-        <div class="tiles">${tilesHtml(pat)}</div>
-        <div>
+        <div style="min-width:64px">
           <span class="step-word">${g.toUpperCase()}</span>
           ${altStr && !isFinal ? `<div class="step-alts">alt: ${altStr}</div>` : ''}
         </div>
+        <div class="tiles">${tilesHtml(pat)}</div>
         <div class="step-meta">
           ${isFinal ? '' : `<span style="color:#555">p=${(prob*100).toFixed(0)}%</span> · `}
           <span>${nBefore}→${nAfter} words</span>
