@@ -36,7 +36,9 @@ BETA_PRESETS: dict[str, float] = {
 # Words not in the dict receive OPENER_PRIOR_DEFAULT (~median of excluded set).
 _OPENER_PRIOR_FILE = Path(__file__).parent.parent / "data" / "wordle" / "opener_prior.json"
 OPENER_PRIOR: dict[str, float] = {}
-OPENER_PRIOR_WEIGHT: float = 3.0
+OPENER_PRIOR_WEIGHT: float = 10.0   # step 0 (opener selection)
+WORD_QUALITY_WEIGHT: float = 3.0    # steps 1+ (familiarity proxy)
+OPENER_PRIOR_DEFAULT: float = -0.5  # penalty for words not in the prior dict
 
 try:
     OPENER_PRIOR = json.loads(_OPENER_PRIOR_FILE.read_text())
@@ -157,12 +159,15 @@ def _score_candidates(
 
     scores = beta * entropies
 
-    if step == 0 and OPENER_PRIOR:
-        # OPENER_PRIOR covers all 2315 answer words. Default 0 for rare fallback words
-        # (non-answer words only appear as candidates when no answer-list word matches
-        # the observed pattern, in which case no opener prior applies).
-        scores += OPENER_PRIOR_WEIGHT * np.array(
-            [OPENER_PRIOR.get(c, 0.0) for c in candidates]
+    if OPENER_PRIOR:
+        # Apply word-quality prior at every step: better openers (via forward solver)
+        # serve as a proxy for word familiarity. Weight is higher at step 0, where
+        # humans rely most on prior knowledge, and lower thereafter.
+        # Words absent from the dict (non-answer fallback words) get a penalty so they
+        # are strongly disfavoured over familiar answer-list words.
+        weight = OPENER_PRIOR_WEIGHT if step == 0 else WORD_QUALITY_WEIGHT
+        scores += weight * np.array(
+            [OPENER_PRIOR.get(c, OPENER_PRIOR_DEFAULT) for c in candidates]
         )
 
     return log_softmax(scores)
@@ -182,7 +187,7 @@ def reconstruct_guesses(
     priors: dict[str, float] | None = None,
     n_top_alternatives: int = 5,
     hard_mode: bool = False,
-    restrict_to_answers: bool = False,
+    restrict_to_answers: bool = True,
 ) -> list[dict]:
     """Reconstruct the most likely sequence of Wordle guesses from a pattern trace.
 
@@ -199,8 +204,10 @@ def reconstruct_guesses(
         n_top_alternatives: Alternatives to report per step in output.
         hard_mode: If True, candidates at step k must also be in current remaining_words
                    (Wordle hard mode constraint).
-        restrict_to_answers: If True, only consider the 2,315 official answer words as
-                             possible guesses (models players who only try common words).
+        restrict_to_answers: If True (default), only consider the 2,315 official answer
+                             words as possible guesses. False allows all 12,972 valid
+                             words; useful for expert analysis but produces unrealistic
+                             results for typical human play.
 
     Returns:
         List of result dicts ranked by probability. Each dict contains:

@@ -142,11 +142,11 @@ def main() -> None:
         help="Assume hard mode: each guess must be consistent with all prior hints",
     )
     parser.add_argument(
-        "--restrict-to-answers",
+        "--all-words",
         action="store_true",
         help=(
-            "Only consider the 2,315 official answer words as candidate guesses "
-            "(models players who stick to common/familiar words)"
+            "Allow all 12,972 valid words as candidate guesses (default is answer "
+            "words only, which better models typical human play)"
         ),
     )
     parser.add_argument(
@@ -187,7 +187,7 @@ def main() -> None:
     print(f"  Rationality:  {rationality_label}")
     print(f"  Beam width:   {args.beam_width}")
     print(f"  Hard mode:    {'yes' if args.hard_mode else 'no'}")
-    print(f"  Guess vocab:  {'official answers only (2,315)' if args.restrict_to_answers else 'all valid words (12,972)'}")
+    print(f"  Guess vocab:  {'official answers only (2,315)' if not args.all_words else 'all valid words (12,972)'}")
     print()
 
     t0 = time.time()
@@ -200,7 +200,7 @@ def main() -> None:
             beam_width=args.beam_width,
             priors=priors,
             hard_mode=args.hard_mode,
-            restrict_to_answers=args.restrict_to_answers,
+            restrict_to_answers=not args.all_words,
         )
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
