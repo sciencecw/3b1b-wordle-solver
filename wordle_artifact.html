@@ -64,10 +64,11 @@
     </div>
     <div class="field">
       <label class="field-label">Paste Wordle share</label>
-      <textarea id="shareIn" placeholder="Wordle 4/6&#10;&#10;⬛🟨🟨⬛⬛&#10;⬛🟨🟨⬛🟨&#10;🟨🟩🟩⬛🟩&#10;🟩🟩🟩🟩🟩" spellcheck="false"></textarea>
+      <textarea id="shareIn" placeholder="Wordle 4/6&#10;&#10;⬛⬛⬛⬛⬛&#10;⬛⬛⬛⬛⬛&#10;⬛⬛⬛⬛⬛&#10;⬛⬛⬛⬛⬛" spellcheck="false"></textarea>
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
       <button class="btn-secondary" onclick="loadRandomExample()">🎲 Random example</button>
+      <button class="btn-secondary" onclick="clearInputs()">✕ Clear</button>
       <span style="font-size:.78rem;color:#bbb">try a sample game</span>
     </div>
     <label class="merge-row">
@@ -359,6 +360,14 @@ function loadRandomExample() {
   const ex = EXAMPLES[Math.floor(Math.random()*EXAMPLES.length)];
   setAnswer(ex.answer);
   document.getElementById('shareIn').value = ex.share;
+}
+
+function clearInputs() {
+  pinBoxes.forEach(b => { b.value = ''; b.classList.remove('filled'); });
+  document.getElementById('shareIn').value = '';
+  document.getElementById('output').innerHTML = '';
+  _beam = null; _patterns = null;
+  pinBoxes[0].focus();
 }
 
 // ── State ──────────────────────────────────────────────────────────────────
