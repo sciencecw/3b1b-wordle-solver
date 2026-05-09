@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+*.npy
+*.json
+simulation_results/
+.ruff_cache/
