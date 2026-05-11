@@ -183,7 +183,8 @@ def reconstruct_guesses(
     answer: str,
     game_name: str = "wordle",
     beta: float = 5.0,
-    beam_width: int = 50,
+    beam_width: int = 200,
+    expansion_per_state: int = 20,
     priors: dict[str, float] | None = None,
     n_top_alternatives: int = 5,
     hard_mode: bool = False,
@@ -198,8 +199,11 @@ def reconstruct_guesses(
         game_name: "wordle" or "dungleon".
         beta:     Rationality parameter. Use BETA_PRESETS or pass a float directly.
                   0 = random play, 5 = normal human, 10 = near-optimal.
-        beam_width: Number of candidate sequences maintained during search. 50 is fast;
-                    100+ is more thorough.
+        beam_width: States kept after pruning at each step. Larger values improve the
+                    probability denominator estimate and yield more merge candidates.
+                    Default 200.
+        expansion_per_state: Candidates expanded per beam state per step. Controls
+                    compute cost independently of beam_width. Default 20.
         priors:   Word probability dict. Defaults to frequency-based priors.
         n_top_alternatives: Alternatives to report per step in output.
         hard_mode: If True, candidates at step k must also be in current remaining_words
@@ -308,8 +312,9 @@ def reconstruct_guesses(
                 (candidates[i], float(np.exp(log_probs[i]))) for i in top_alt_idx
             ]
 
-            # Only expand the highest-probability candidates (bounded by beam_width)
-            expansion_limit = min(beam_width, len(candidates))
+            # Expand top candidates per state; keep beam_width separate from expansion
+            # so the stored beam is large (good denominator) without quadratic blowup.
+            expansion_limit = min(expansion_per_state, len(candidates))
             expand_idx = np.argsort(log_probs)[-expansion_limit:]
 
             n_before = len(state.remaining_words)
