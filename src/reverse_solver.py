@@ -39,7 +39,7 @@ OPENER_PRIOR: dict[str, float] = {}
 OPENER_PRIOR_WEIGHT: float = 10.0   # step 0 (opener selection)
 WORD_QUALITY_WEIGHT: float = 3.0    # steps 1+ (familiarity proxy)
 OPENER_PRIOR_DEFAULT: float = -0.5  # penalty for words not in the prior dict
-POSSIBLE_ANSWER_BONUS: float = 2.0  # bonus for candidates that are still a possible answer
+POSSIBLE_ANSWER_BONUS: float = 3.5  # bonus for candidates that are still a possible answer
 
 try:
     OPENER_PRIOR = json.loads(_OPENER_PRIOR_FILE.read_text())
