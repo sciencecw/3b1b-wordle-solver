@@ -39,6 +39,7 @@ OPENER_PRIOR: dict[str, float] = {}
 OPENER_PRIOR_WEIGHT: float = 10.0   # step 0 (opener selection)
 WORD_QUALITY_WEIGHT: float = 3.0    # steps 1+ (familiarity proxy)
 OPENER_PRIOR_DEFAULT: float = -0.5  # penalty for words not in the prior dict
+POSSIBLE_ANSWER_BONUS: float = 2.0  # bonus for candidates that are still a possible answer
 
 try:
     OPENER_PRIOR = json.loads(_OPENER_PRIOR_FILE.read_text())
@@ -158,6 +159,14 @@ def _score_candidates(
     entropies = get_entropies(candidates, remaining_words, weights, game_name)
 
     scores = beta * entropies
+
+    # Possible-answer bonus: candidates that are themselves still plausible answers
+    # get a boost modelling both (a) the lucky-win probability and (b) human preference
+    # for guessing real words over pure elimination plays.
+    remaining_set = set(remaining_words)
+    scores += POSSIBLE_ANSWER_BONUS * np.array(
+        [1.0 if c in remaining_set else 0.0 for c in candidates]
+    )
 
     if OPENER_PRIOR:
         # Apply word-quality prior at every step: better openers (via forward solver)
