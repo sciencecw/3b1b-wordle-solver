@@ -39,9 +39,9 @@ OPENER_PRIOR: dict[str, float] = {}
 OPENER_PRIOR_WEIGHT: float = 10.0   # step 0 (opener selection)
 WORD_QUALITY_WEIGHT: float = 3.0    # steps 1+ (familiarity proxy)
 OPENER_PRIOR_DEFAULT: float = -0.5  # penalty for words not in the prior dict
-POSSIBLE_ANSWER_BONUS: float = 3.5       # endgame bonus for candidates still in remaining_words
-POSSIBLE_ANSWER_BONUS_BASE: float = 1.0  # always-on smaller bonus (slight human preference for real words)
-ANSWER_BONUS_THRESHOLD: int = 6          # full bonus applies when <= this many words remain
+POSSIBLE_ANSWER_BONUS: float = 3.5       # nats bonus at n=1 remaining (endgame)
+POSSIBLE_ANSWER_BONUS_BASE: float = 1.0  # nats bonus at n>=ANSWER_BONUS_RAMP_N remaining
+ANSWER_BONUS_RAMP_N: int = 12            # linearly interpolate between base and full below this
 
 try:
     OPENER_PRIOR = json.loads(_OPENER_PRIOR_FILE.read_text())
@@ -162,14 +162,12 @@ def _score_candidates(
 
     scores = beta * entropies
 
-    # Possible-answer bonus: candidates still in remaining_words get a boost.
-    # Full bonus in endgame (few words left, lucky-win probability is meaningful);
-    # smaller always-on base models the general human preference for real words.
+    # Possible-answer bonus: linearly ramps from POSSIBLE_ANSWER_BONUS (at n=1)
+    # down to POSSIBLE_ANSWER_BONUS_BASE (at n>=ANSWER_BONUS_RAMP_N).
+    # Models (a) lucky-win probability and (b) human preference for real words.
     remaining_set = set(remaining_words)
-    answer_bonus = (
-        POSSIBLE_ANSWER_BONUS if len(remaining_words) <= ANSWER_BONUS_THRESHOLD
-        else POSSIBLE_ANSWER_BONUS_BASE
-    )
+    t = max(0.0, min(1.0, (ANSWER_BONUS_RAMP_N - len(remaining_words)) / (ANSWER_BONUS_RAMP_N - 1)))
+    answer_bonus = POSSIBLE_ANSWER_BONUS_BASE + (POSSIBLE_ANSWER_BONUS - POSSIBLE_ANSWER_BONUS_BASE) * t
     scores += answer_bonus * np.array(
         [1.0 if c in remaining_set else 0.0 for c in candidates]
     )
