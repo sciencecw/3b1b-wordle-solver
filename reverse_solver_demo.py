@@ -37,8 +37,8 @@ from src.reverse_solver import BETA_PRESETS, parse_pattern, reconstruct_guesses
 def _parse_pattern_arg(s: str) -> int:
     """Parse a single pattern argument in any of the supported formats."""
     s = s.strip()
-    # Emoji string
-    if any(c in s for c in "⬛🟨🟩"):
+    # Emoji string (⬜ counts as gray, same as ⬛)
+    if any(c in s for c in "⬛⬜🟨🟩"):
         return parse_pattern(s)
     # Comma-separated list
     if "," in s:
@@ -66,9 +66,10 @@ def _print_result(result: dict, show_alternatives: bool = True) -> None:
             f"{si['pattern_str']}  "
             f"p={p_str}  [{remaining_info}]"
         )
-        if show_alternatives and len(alts) > 1:
+        other_alts = [(w, p) for w, p in alts if w != si["guess"]][:3]
+        if show_alternatives and other_alts:
             alt_str = "  alts: " + ", ".join(
-                f"{w}({p:.2f})" for w, p in alts[1:4]
+                f"{w}({p:.2f})" for w, p in other_alts
             )
             line += alt_str
         print(line)
@@ -142,11 +143,21 @@ def main() -> None:
         help="Assume hard mode: each guess must be consistent with all prior hints",
     )
     parser.add_argument(
-        "--all-words",
+        "--restrict-to-answers",
         action="store_true",
         help=(
-            "Allow all 12,972 valid words as candidate guesses (default is answer "
-            "words only, which better models typical human play)"
+            "Never consider words outside the official answer list as guesses. "
+            "By default all valid words are considered, discounted by "
+            "--out-of-list-discount."
+        ),
+    )
+    parser.add_argument(
+        "--out-of-list-discount",
+        type=float,
+        default=0.1,
+        help=(
+            "Prior discount for guesses outside the official answer list "
+            "(default 0.1 = 10x less likely; 1.0 disables)"
         ),
     )
     parser.add_argument(
@@ -177,17 +188,24 @@ def main() -> None:
 
     # Print header
     from src.pattern import pattern_to_string
-    pattern_display = "  ".join(pattern_to_string(p) for p in patterns)
     print()
-    print(f"Reverse Wordle solver")
+    print("Reverse Wordle solver")
     print(f"  Answer:       {args.answer.upper()}")
     print(f"  Pattern trace ({len(patterns)} guesses):")
     for i, p in enumerate(patterns):
         print(f"    Guess {i + 1}: {pattern_to_string(p)}")
+    from src.prior import get_word_list
+    n_answers = len(get_word_list(args.game_name, short=True))
+    n_allowed = len(get_word_list(args.game_name, short=False))
+    vocab_label = (
+        f"official answers only ({n_answers:,})"
+        if args.restrict_to_answers
+        else f"all valid words ({n_allowed:,}), out-of-list discount {args.out_of_list_discount:g}"
+    )
     print(f"  Rationality:  {rationality_label}")
     print(f"  Beam width:   {args.beam_width}")
     print(f"  Hard mode:    {'yes' if args.hard_mode else 'no'}")
-    print(f"  Guess vocab:  {'official answers only (2,315)' if not args.all_words else 'all valid words (12,972)'}")
+    print(f"  Guess vocab:  {vocab_label}")
     print()
 
     t0 = time.time()
@@ -200,7 +218,8 @@ def main() -> None:
             beam_width=args.beam_width,
             priors=priors,
             hard_mode=args.hard_mode,
-            restrict_to_answers=not args.all_words,
+            restrict_to_answers=args.restrict_to_answers,
+            out_of_list_discount=args.out_of_list_discount,
         )
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
