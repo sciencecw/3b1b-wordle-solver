@@ -13,13 +13,12 @@ CMD in the Dockerfile. The `share` flag is not needed on HF.
 from __future__ import annotations
 
 import argparse
-import sys
 
 import gradio as gr
 
-from src.pattern import pattern_to_int_list
+from src.pattern import get_pattern_matrix, pattern_to_int_list
 from src.prior import get_true_wordle_prior, get_word_list
-from src.reverse_solver import BETA_PRESETS, parse_pattern, reconstruct_guesses
+from src.reverse_solver import BETA_PRESETS, parse_share_text, reconstruct_guesses
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -31,7 +30,6 @@ TILE_STYLE = (
     "width:44px;height:44px;border-radius:4px;margin:2px;"
     "font-size:22px;font-weight:bold;color:white;"
 )
-TILE_CHARS = set("⬛⬜🟨🟩")
 
 RATIONALITY_MAP = {"Casual": "casual", "Normal": "normal", "Expert": "expert"}
 
@@ -45,43 +43,10 @@ def _load():
     if _PRIORS is None:
         _PRIORS = get_true_wordle_prior("wordle")
         _ALLOWED = set(get_word_list("wordle", short=False))
-        # Warm the pattern matrix cache by touching it
-        get_word_list("wordle", short=True)
-
-
-# ---------------------------------------------------------------------------
-# Input parsing
-# ---------------------------------------------------------------------------
-
-
-def parse_wordle_share(text: str) -> list[int]:
-    """Extract emoji pattern rows from a pasted Wordle share block.
-
-    Accepts the full clipboard format:
-        Wordle 1,784 4/6
-
-        🟨🟨⬛⬛⬛
-        🟨⬛⬛🟨🟨
-        ...
-
-    Also accepts bare emoji rows without the header.
-    Handles both ⬛ (U+2B1B) and ⬜ (U+2B1C) as gray.
-    """
-    rows = []
-    for line in text.strip().splitlines():
-        chars = list(line.strip())
-        if len(chars) == 5 and all(c in TILE_CHARS for c in chars):
-            rows.append(parse_pattern(line.strip()))
-    if not rows:
-        raise ValueError(
-            "No emoji rows found. Paste the full Wordle share including the emoji grid."
-        )
-    if rows[-1] != 242:
-        raise ValueError(
-            "The last row must be all-green 🟩🟩🟩🟩🟩 — "
-            "the reverse solver only works for games the player won."
-        )
-    return rows
+        # Warm the pattern matrix cache: the first get_pattern_matrix call loads
+        # (or generates) the full grid, which is the slow part of a cold solve.
+        first = next(iter(_ALLOWED))
+        get_pattern_matrix([first], [first], "wordle")
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +68,6 @@ def _render_results(results: list[dict]) -> str:
     for res in results[:3]:
         rank = res["rank"]
         pct = res["normalized_probability"] * 100
-        guesses = res["guesses"]
 
         medal = ["🥇", "🥈", "🥉"][rank - 1]
         header = (
@@ -167,7 +131,7 @@ def _render_results(results: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def solve(answer_raw: str, share_text: str, rationality_label: str) -> str:
+def solve(answer_raw: str, share_text: str, rationality_label: str, hard_mode: bool) -> str:
     _load()
 
     answer = answer_raw.strip().lower()
@@ -180,7 +144,7 @@ def solve(answer_raw: str, share_text: str, rationality_label: str) -> str:
         )
 
     try:
-        patterns = parse_wordle_share(share_text)
+        patterns = parse_share_text(share_text)
     except ValueError as e:
         return f'<p style="color:red;">{e}</p>'
 
@@ -192,14 +156,20 @@ def solve(answer_raw: str, share_text: str, rationality_label: str) -> str:
             answer=answer,
             game_name="wordle",
             beta=beta,
-            beam_width=50,
-            restrict_to_answers=True,
             priors=_PRIORS,
+            hard_mode=hard_mode,
         )
     except ValueError as e:
         return f'<p style="color:red;">Solver error: {e}</p>'
 
-    return _render_results(results)
+    banner = ""
+    if results and not results[0]["won"]:
+        banner = (
+            '<p style="color:#b45309;font-weight:600;">'
+            f"❌ Lost game — none of the six guesses found {answer.upper()}. "
+            "Reconstructing all six tries.</p>"
+        )
+    return banner + _render_results(results)
 
 
 # ---------------------------------------------------------------------------
@@ -210,11 +180,13 @@ _EXAMPLE_4 = (
     "umbra",
     "Wordle 1,784 4/6\n\n🟨🟨⬛⬛⬛\n🟨⬛⬛🟨🟨\n⬛⬛🟨🟩🟨\n🟩🟩🟩🟩🟩",
     "Normal",
+    False,
 )
 _EXAMPLE_5 = (
     "umbra",
     "Wordle 1,784 5/6\n\n⬜🟨🟨⬜⬜\n🟨🟨⬜⬜⬜\n🟨🟨🟨🟨⬜\n🟨🟨🟨🟨🟩\n🟩🟩🟩🟩🟩",
     "Normal",
+    False,
 )
 
 with gr.Blocks(title="Reverse Wordle Solver") as app:
@@ -224,9 +196,9 @@ with gr.Blocks(title="Reverse Wordle Solver") as app:
 Paste your Wordle share and enter the answer — the solver will reconstruct
 the most likely guesses using information theory and a model of human play.
 
-*Guesses are drawn from the **2,315 official Wordle answer words** to keep
-results realistic. Uses a Boltzmann rationality model: higher β = closer to
-optimal information-theoretic play.*
+*Guesses favor the **2,315 official Wordle answer words**; obscure-but-valid
+words are considered but discounted 10x. Uses a Boltzmann rationality model:
+higher β = closer to optimal information-theoretic play.*
         """
     )
 
@@ -246,25 +218,31 @@ optimal information-theoretic play.*
             scale=2,
         )
 
-    rationality = gr.Radio(
-        ["Casual", "Normal", "Expert"],
-        value="Normal",
-        label="Player type",
-        info="Casual (β=2): human-like  ·  Normal (β=5): engaged  ·  Expert (β=10): near-optimal",
-    )
+    with gr.Row():
+        rationality = gr.Radio(
+            ["Casual", "Normal", "Expert"],
+            value="Normal",
+            label="Player type",
+            info="Casual (β=2): human-like  ·  Normal (β=5): engaged  ·  Expert (β=10): near-optimal",
+        )
+        hard_mode_box = gr.Checkbox(
+            value=False,
+            label="Hard mode",
+            info="Every guess must reuse revealed hints (greens stay in place, yellows must appear)",
+        )
 
     solve_btn = gr.Button("🔍 Reconstruct guesses", variant="primary", size="lg")
     output = gr.HTML(label="Reconstructions")
 
     gr.Examples(
         examples=[list(_EXAMPLE_4), list(_EXAMPLE_5)],
-        inputs=[answer_box, share_box, rationality],
+        inputs=[answer_box, share_box, rationality, hard_mode_box],
         label="Try these examples (Wordle 1,784, answer = UMBRA)",
     )
 
     solve_btn.click(
         fn=solve,
-        inputs=[answer_box, share_box, rationality],
+        inputs=[answer_box, share_box, rationality, hard_mode_box],
         outputs=output,
     )
 
