@@ -44,7 +44,9 @@ model (β controls how close to optimal the player is assumed to be), a
 forward-solver word-quality prior, and a 10x discount for words outside the
 official answer list. Answers outside the official list (e.g. newer NYT
 answers) are supported. Hard mode (guesses must reuse revealed hints) is
-supported via `--hard-mode` / the web checkbox.
+supported via `--hard-mode` / the web checkbox. Lost games ("X/6" shares:
+all six rows, no all-green) are reconstructed too — all six guesses are
+inferred, none of which is the answer.
 
 ```bash
 # From a pattern trace (int, comma-list, or emoji forms accepted)

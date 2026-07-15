@@ -109,23 +109,25 @@ def parse_pattern(pattern) -> int:
 def parse_pattern_trace(patterns: list) -> list[int]:
     """Normalize a full trace.
 
-    Validates that the last pattern is all-green (242) and that no earlier
-    pattern is all-green (the game would already have ended there).
+    A winning trace ends with the all-green row (242). A losing trace — the
+    player ran out of guesses — is also accepted: it must have exactly
+    MAX_GUESSES rows and contain no all-green row. No pattern before the last
+    row may be all-green (the game would already have ended there).
     """
     parsed = [parse_pattern(p) for p in patterns]
     if not parsed:
         raise ValueError("Pattern trace must be non-empty")
-    if parsed[-1] != ALL_GREEN_PATTERN:
-        raise ValueError(
-            f"Last pattern must be all-green ({ALL_GREEN_PATTERN}), got {parsed[-1]}. "
-            "The reverse solver assumes the player succeeded on the final guess."
-        )
     for i, p in enumerate(parsed[:-1]):
         if p == ALL_GREEN_PATTERN:
             raise ValueError(
                 f"Pattern {i + 1} is all-green but is not the last row — "
                 "the game would have ended there."
             )
+    if parsed[-1] != ALL_GREEN_PATTERN and len(parsed) != MAX_GUESSES:
+        raise ValueError(
+            f"Last pattern must be all-green ({ALL_GREEN_PATTERN}) for a won game, "
+            f"and a lost game must show all {MAX_GUESSES} rows (got {len(parsed)})."
+        )
     return parsed
 
 
@@ -330,7 +332,8 @@ def reconstruct_guesses(
 
     Args:
         patterns: List of N patterns. Each can be an int (0–242), a 5-int list, or
-                  a 5-emoji string. The last pattern MUST be all-green (the win).
+                  a 5-emoji string. A won game ends with the all-green row; a lost
+                  game is a full 6-row trace with no all-green row.
         answer:   The correct answer word. May be outside the official answer list
                   (e.g. post-2022 NYT answers): it then participates with an
                   `out_of_list_discount` prior instead of being excluded.
@@ -359,13 +362,20 @@ def reconstruct_guesses(
 
     Returns:
         List of result dicts ranked by probability. Each dict contains:
-          rank, guesses, log_probability, normalized_probability, step_info.
+          rank, guesses, won, log_probability, normalized_probability, step_info.
         step_info is a list of per-step dicts with guess, pattern, pattern_str,
         n_candidates, n_remaining_before, n_remaining_after, step_probability,
-        top_alternatives.
+        top_alternatives. For a lost game, `won` is False and all N observed
+        guesses are reconstructed (none of them is the answer).
     """
     parsed_patterns = parse_pattern_trace(patterns)
     n_guesses = len(parsed_patterns)
+    won = parsed_patterns[-1] == ALL_GREEN_PATTERN
+    # For a win, the final guess is deterministically the answer, so only the
+    # earlier rows are searched. For a loss, every observed row is a real
+    # guess to reconstruct (the "7th all-green try" is implicit: the answer is
+    # given and stays consistent with every row by construction).
+    n_search_steps = n_guesses - 1 if won else n_guesses
 
     if not 0.0 < out_of_list_discount <= 1.0:
         raise ValueError(f"out_of_list_discount must be in (0, 1], got {out_of_list_discount}")
@@ -405,13 +415,14 @@ def reconstruct_guesses(
     # Word-quality prior only applies to the game it was computed for
     use_opener_prior = bool(OPENER_PRIOR) and game_name == "wordle"
 
-    # Precompute candidates for steps 0..N-2 (last step is always the answer,
-    # pattern 242). The player's guesses may be any valid word: non-answer words
-    # are down-weighted in scoring via `out_of_list_discount` rather than
-    # excluded. To bound compute, the full vocabulary is only mixed in at step 0
-    # and wherever answer-list matches are scarce (< NON_ANSWER_UNION_THRESHOLD).
+    # Precompute candidates for each searched step (for a won game the last row
+    # is always the answer, pattern 242, and is not searched). The player's
+    # guesses may be any valid word: non-answer words are down-weighted in
+    # scoring via `out_of_list_discount` rather than excluded. To bound compute,
+    # the full vocabulary is only mixed in at step 0 and wherever answer-list
+    # matches are scarce (< NON_ANSWER_UNION_THRESHOLD).
     step_candidates: list[list[str]] = []
-    for k in range(n_guesses - 1):
+    for k in range(n_search_steps):
         candidates = get_candidates_for_pattern(
             answer, parsed_patterns[k], possible_words, game_name
         )
@@ -438,9 +449,9 @@ def reconstruct_guesses(
     beam: list[BeamState] = [BeamState(remaining_words=initial_remaining)]
 
     # -----------------------------------------------------------------------
-    # Beam search over steps 0..N-2
+    # Beam search over the observed guesses
     # -----------------------------------------------------------------------
-    for k in range(n_guesses - 1):
+    for k in range(n_search_steps):
         all_candidates = step_candidates[k]
         p_k = parsed_patterns[k]
         new_beam: list[BeamState] = []
@@ -453,6 +464,7 @@ def reconstruct_guesses(
                 continue
 
             # Hard mode: the guess must honor every hint revealed so far
+            cand_idx = None  # None = all of all_candidates
             if hard_mode and state.guesses:
                 fixed, min_counts = merge_hard_mode_constraints(
                     state.guesses, parsed_patterns[: len(state.guesses)]
@@ -463,10 +475,22 @@ def reconstruct_guesses(
                 ]
                 if not cand_idx:
                     continue
-                candidates = [all_candidates[i] for i in cand_idx]
-            else:
-                cand_idx = None
-                candidates = all_candidates
+
+            # Players don't repeat a guess (it reveals nothing new), so drop
+            # already-guessed words — unless that would leave no candidates,
+            # in which case the repeat is what the trace actually shows.
+            if state.guesses:
+                guessed = set(state.guesses)
+                pool = cand_idx if cand_idx is not None else range(len(all_candidates))
+                pool_size = len(cand_idx) if cand_idx is not None else len(all_candidates)
+                no_repeat = [i for i in pool if all_candidates[i] not in guessed]
+                if no_repeat and len(no_repeat) < pool_size:
+                    cand_idx = no_repeat
+
+            candidates = (
+                all_candidates if cand_idx is None
+                else [all_candidates[i] for i in cand_idx]
+            )
 
             remaining_key = tuple(state.remaining_words)
             all_entropies = entropy_cache.get(remaining_key)
@@ -535,22 +559,25 @@ def reconstruct_guesses(
         beam = new_beam[:beam_width]
 
     # -----------------------------------------------------------------------
-    # Append the final deterministic guess (the answer itself)
+    # For a won game, append the final deterministic guess (the answer itself).
+    # For a lost game, every observed guess is already reconstructed.
     # -----------------------------------------------------------------------
-    final_beam: list[BeamState] = []
-    for state in beam:
-        n_before = len(state.remaining_words)
-        final_beam.append(BeamState(
-            guesses=state.guesses + [answer],
-            remaining_words=[answer],
-            log_prob=state.log_prob,
-            step_probs=state.step_probs + [1.0],
-            remaining_sizes=state.remaining_sizes + [(n_before, 1)],
-            n_candidates=state.n_candidates + [1],
-            top_alternatives_per_step=state.top_alternatives_per_step + [[(answer, 1.0)]],
-        ))
+    if won:
+        final_beam: list[BeamState] = []
+        for state in beam:
+            n_before = len(state.remaining_words)
+            final_beam.append(BeamState(
+                guesses=state.guesses + [answer],
+                remaining_words=[answer],
+                log_prob=state.log_prob,
+                step_probs=state.step_probs + [1.0],
+                remaining_sizes=state.remaining_sizes + [(n_before, 1)],
+                n_candidates=state.n_candidates + [1],
+                top_alternatives_per_step=state.top_alternatives_per_step + [[(answer, 1.0)]],
+            ))
+        beam = final_beam
 
-    return _format_results(final_beam, parsed_patterns)
+    return _format_results(beam, parsed_patterns, won)
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +588,7 @@ def reconstruct_guesses(
 def _format_results(
     beam: list[BeamState],
     patterns: list[int],
+    won: bool,
 ) -> list[dict]:
     """Format beam states into ranked reconstruction result dicts."""
     log_probs = np.array([s.log_prob for s in beam])
@@ -597,6 +625,7 @@ def _format_results(
         results.append({
             "rank": rank + 1,
             "guesses": state.guesses,
+            "won": won,
             "log_probability": float(state.log_prob),
             "normalized_probability": float(norm_prob),
             "step_info": step_infos,

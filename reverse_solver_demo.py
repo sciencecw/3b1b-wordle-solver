@@ -92,7 +92,8 @@ def main() -> None:
         help=(
             "Pattern sequence. Each pattern can be: an int 0-242, a comma-separated "
             "5-digit list (e.g. 1,1,0,0,0), or a 5-emoji string. "
-            "Last pattern must be all-green (242 / 2,2,2,2,2 / 🟩🟩🟩🟩🟩)."
+            "A won game ends with all-green (242 / 2,2,2,2,2 / 🟩🟩🟩🟩🟩); "
+            "a lost game is all 6 rows with no all-green."
         ),
     )
     parser.add_argument(
@@ -226,6 +227,8 @@ def main() -> None:
         sys.exit(1)
     elapsed = time.time() - t0
 
+    if results and not results[0]["won"]:
+        print(f"Lost game: none of the {len(patterns)} guesses found the answer.\n")
     print(f"Top {min(args.top_k, len(results))} reconstructions  "
           f"(solved in {elapsed:.1f}s):\n")
     for result in results[: args.top_k]:

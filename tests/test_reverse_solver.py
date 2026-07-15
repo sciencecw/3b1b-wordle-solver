@@ -74,13 +74,21 @@ class TestParsePatternTrace:
         with pytest.raises(ValueError):
             parse_pattern_trace([])
 
-    def test_last_must_be_green(self):
+    def test_short_trace_must_end_green(self):
         with pytest.raises(ValueError, match="all-green"):
             parse_pattern_trace([4, 109])
 
     def test_intermediate_green_rejected(self):
         with pytest.raises(ValueError, match="ended"):
             parse_pattern_trace([242, 242])
+
+    def test_lost_game_six_rows_accepted(self):
+        trace = [4, 109, 144, 13, 40, 121]
+        assert parse_pattern_trace(trace) == trace
+
+    def test_lost_game_wrong_length_rejected(self):
+        with pytest.raises(ValueError, match="lost game"):
+            parse_pattern_trace([4, 109, 144, 13, 40])
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +124,15 @@ class TestParseShareText:
     def test_last_row_not_green(self):
         with pytest.raises(ValueError, match="all-green"):
             parse_share_text("🟨🟨⬛⬛⬛\n⬛⬛🟨🟩🟨")
+
+    def test_lost_game_share(self):
+        # "Wordle X/6" share: six rows, none all-green
+        text = "Wordle 1,790 X/6\n\n" + "\n".join(
+            ["🟨🟨⬛⬛⬛", "🟨⬛⬛🟨🟨", "⬛⬛🟨🟩🟨", "🟨⬛🟨⬛⬛", "⬛🟨⬛🟨⬛", "🟨🟩⬛⬛🟨"]
+        )
+        rows = parse_share_text(text)
+        assert len(rows) == 6
+        assert all(r != 242 for r in rows)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +252,26 @@ class TestReconstruction:
         assert all(w in answer_set for w in top_words), (
             f"expected answer-list words to win, got {top_words}"
         )
+
+    def test_won_flag_set(self):
+        results = reconstruct_guesses(patterns=self.PATTERNS, answer=self.ANSWER)
+        assert results[0]["won"] is True
+
+    def test_lost_game_reconstruction(self):
+        # Build a genuine losing trace: six real guesses, none of them the answer
+        answer = "vivid"
+        guesses = ["crane", "moist", "gaudy", "pluck", "fewer", "begin"]
+        patterns = [int(get_pattern(g, answer, "wordle")) for g in guesses]
+        assert all(p != 242 for p in patterns)
+
+        results = reconstruct_guesses(patterns=patterns, answer=answer)
+        top = results[0]
+        assert top["won"] is False
+        assert len(top["guesses"]) == 6
+        assert answer not in top["guesses"]
+        # a plausible player never repeats a guess, even across identical rows
+        assert len(set(top["guesses"])) == 6, f"repeated guess in {top['guesses']}"
+        _assert_consistent(top, patterns, answer)
 
     def test_invalid_discount_rejected(self):
         with pytest.raises(ValueError, match="discount"):

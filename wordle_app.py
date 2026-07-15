@@ -162,7 +162,14 @@ def solve(answer_raw: str, share_text: str, rationality_label: str, hard_mode: b
     except ValueError as e:
         return f'<p style="color:red;">Solver error: {e}</p>'
 
-    return _render_results(results)
+    banner = ""
+    if results and not results[0]["won"]:
+        banner = (
+            '<p style="color:#b45309;font-weight:600;">'
+            f"❌ Lost game — none of the six guesses found {answer.upper()}. "
+            "Reconstructing all six tries.</p>"
+        )
+    return banner + _render_results(results)
 
 
 # ---------------------------------------------------------------------------
